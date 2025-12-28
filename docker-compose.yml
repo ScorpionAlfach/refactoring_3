@@ -1,0 +1,127 @@
+version: '3.8'
+
+services:
+  api_gateway:
+    build: ./api_gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    networks:
+      - app-network
+    depends_on:
+      - service_users
+      - service_orders
+      - service_payments
+
+  service_users:
+    build: ./service_users
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://user:password@db_users:5432/users_db
+      - REDIS_HOST=cache
+    depends_on:
+      db_users:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: on-failure
+
+  service_orders:
+    build: ./service_orders
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://user:password@db_orders:5432/orders_db
+      - REDIS_HOST=cache
+    depends_on:
+      db_orders:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: on-failure
+
+  service_payments:
+    build: ./service_payments
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://user:password@db_payments:5432/payments_db
+      - REDIS_HOST=cache
+    depends_on:
+      db_payments:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: on-failure
+
+  db_users:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: users_db
+    volumes:
+      - postgres_data_users:/var/lib/postgresql/data
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d users_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  db_orders:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: orders_db
+    volumes:
+      - postgres_data_orders:/var/lib/postgresql/data
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d orders_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  db_payments:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: payments_db
+    volumes:
+      - postgres_data_payments:/var/lib/postgresql/data
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d payments_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  cache:
+    image: redis:7-alpine
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  postgres_data_users:
+  postgres_data_orders:
+  postgres_data_payments:
+
+networks:
+  app-network:
+    driver: bridge
