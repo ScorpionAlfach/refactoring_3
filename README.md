@@ -1,480 +1,358 @@
-# 🎓 Практическое задание 3 - ВЫПОЛНЕНО
+# Отчет о рефакторинге: разбиение монолита на микросервисы
 
-## ✅ Что реализовано
+## Отчет выполнил студент группы ЭФБО-06-22, Крояков Андрей
 
-Полная микросервисная архитектура на Python FastAPI с:
-- ✅ Рефакторинг структуры проекта (модули: models, schemas, routes, services, database)
-- ✅ PostgreSQL вместо хранения в памяти
-- ✅ Redis кэширование для GET запросов
-- ✅ Circuit Breaker паттерн
-- ✅ API Aggregation
-- ✅ Дополнительный микросервис (Payments)
-- ✅ Полная интеграция через API Gateway
-- ✅ Docker Compose для всех сервисов
+## ссылка на репозиторий проекта https://github.com/ScorpionAlfach/refactoring_3?tab=readme-ov-file
 
-## 📂 Структура проекта
+## Проблема
 
-```
-microservices_completed/
-├── docker-compose.yml          # Оркестрация всех сервисов
-│
-├── api_gateway/                # API Gateway с Circuit Breaker
-│   ├── main.py
-│   ├── Dockerfile
-│   └── requirements.txt
-│
-├── service_users/              # Сервис пользователей
-│   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py            # FastAPI приложение
-│   │   ├── models.py          # SQLAlchemy модели
-│   │   ├── schemas.py         # Pydantic схемы
-│   │   ├── database.py        # PostgreSQL подключение
-│   │   ├── redis_client.py    # Redis клиент
-│   │   ├── routes/            # Эндпоинты
-│   │   │   └── users.py
-│   │   └── services/          # Бизнес-логика с кэшированием
-│   │       └── user_service.py
-│   ├── Dockerfile
-│   └── requirements.txt
-│
-├── service_orders/             # Сервис заказов (аналогичная структура)
-│   ├── app/
-│   │   ├── models.py          # Order модель
-│   │   ├── schemas.py
-│   │   ├── database.py
-│   │   ├── redis_client.py
-│   │   ├── routes/
-│   │   │   └── orders.py
-│   │   └── services/
-│   │       └── order_service.py
-│   ├── Dockerfile
-│   └── requirements.txt
-│
-└── service_payments/           # Новый сервис платежей
-    ├── app/
-    │   ├── models.py          # Payment модель
-    │   ├── schemas.py
-    │   ├── database.py
-    │   ├── redis_client.py
-    │   ├── routes/
-    │   │   └── payments.py
-    │   └── services/
-    │       └── payment_service.py
-    ├── Dockerfile
-    └── requirements.txt
-```
-
-## 🚀 Запуск проекта
-
-### 1. Запустить все сервисы
-
-```bash
-docker-compose up --build
-```
-
-**Что происходит:**
-- Запускаются 3 PostgreSQL базы данных (users_db, orders_db, payments_db)
-- Запускается Redis для кэширования
-- Запускаются 3 микросервиса (users, orders, payments)
-- Запускается API Gateway на порту 8000
-- Автоматически создаются таблицы в БД
-
-### 2. Проверка работы
-
-```bash
-# Health check
-curl http://localhost:8000/health
-
-# Status
-curl http://localhost:8000/status
-```
-
-## 📝 Тестирование API
-
-### Users
-
-```bash
-# Создать пользователя
-curl -X POST http://localhost:8000/users \
-  -H "Content-Type: application/json" \
-  -d '{"email": "test@example.com", "name": "Test User"}'
-
-# Получить пользователя (первый запрос - БД, второй - кэш)
-curl http://localhost:8000/users/1
-curl http://localhost:8000/users/1  # Быстрее!
-
-# Обновить пользователя
-curl -X PUT http://localhost:8000/users/1 \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Updated User"}'
-
-# Получить всех пользователей
-curl http://localhost:8000/users
-
-# Удалить пользователя
-curl -X DELETE http://localhost:8000/users/1
-```
-
-### Orders
-
-```bash
-# Создать заказ
-curl -X POST http://localhost:8000/orders \
-  -H "Content-Type: application/json" \
-  -d '{"userId": 1, "product": "Laptop", "quantity": 2}'
-
-# Получить заказ (с кэшированием)
-curl http://localhost:8000/orders/1
-
-# Получить все заказы
-curl http://localhost:8000/orders
-
-# Получить заказы пользователя
-curl http://localhost:8000/orders?userId=1
-
-# Обновить заказ
-curl -X PUT http://localhost:8000/orders/1 \
-  -H "Content-Type: application/json" \
-  -d '{"quantity": 3}'
-
-# Удалить заказ
-curl -X DELETE http://localhost:8000/orders/1
-```
-
-### Payments
-
-```bash
-# Создать платеж (30% шанс отказа!)
-curl -X POST http://localhost:8000/payments \
-  -H "Content-Type: application/json" \
-  -d '{"order_id": 1, "amount": 999.99}'
-
-# Получить платеж
-curl http://localhost:8000/payments/1
-
-# Получить все платежи
-curl http://localhost:8000/payments
-
-# Получить платежи для заказа
-curl http://localhost:8000/payments?order_id=1
-
-# Обновить статус платежа
-curl -X PUT http://localhost:8000/payments/1 \
-  -H "Content-Type: application/json" \
-  -d '{"status": "completed"}'
-
-# Удалить платеж
-curl -X DELETE http://localhost:8000/payments/1
-```
-
-### API Aggregation
-
-```bash
-# Получить пользователя с его заказами (один запрос!)
-curl http://localhost:8000/users/1/details
-```
-
-## 🔥 Особенности реализации
-
-### 1. Модульная структура
-
-Каждый сервис разделен на слои:
-- **models.py** - SQLAlchemy модели (таблицы БД)
-- **schemas.py** - Pydantic схемы (валидация данных)
-- **database.py** - Подключение к PostgreSQL
-- **redis_client.py** - Клиент для кэширования
-- **routes/** - Эндпоинты (HTTP handlers)
-- **services/** - Бизнес-логика + кэширование
-
-### 2. Кэширование с Redis
-
-**Стратегия: Cache-Aside (Lazy Loading)**
+монолитное приложение где все сущности в одном файле, данные хранятся в памяти, при перезапуске всё теряется.
 
 ```python
-def get_user_by_id(db: Session, user_id: int):
-    # 1. Проверяем кэш
-    cached = redis_client.get(f"user:{user_id}")
-    if cached:
-        return cached
-    
-    # 2. Запрос в БД
-    user = db.query(User).filter(User.id == user_id).first()
-    
-    # 3. Сохраняем в кэш на 5 минут
-    redis_client.set(f"user:{user_id}", user_dict, expire=300)
-    
-    return user_dict
+from fastapi import FastAPI, HTTPException
+
+app = FastAPI()
+
+users_db = {}
+orders_db = {}
+payments_db = {}
+user_counter = 0
+order_counter = 0
+payment_counter = 0
+
+
+@app.post("/users")
+def create_user(email: str, name: str):
+    global user_counter
+    user_counter += 1
+    users_db[user_counter] = {"id": user_counter, "email": email, "name": name}
+    return users_db[user_counter]
+
+
+@app.get("/users/{user_id}")
+def get_user(user_id: int):
+    if user_id not in users_db:
+        raise HTTPException(status_code=404, detail="User not found")
+    return users_db[user_id]
+
+
+@app.post("/orders")
+def create_order(user_id: int, product: str, quantity: int):
+    global order_counter
+    if user_id not in users_db:
+        raise HTTPException(status_code=404, detail="User not found")
+    order_counter += 1
+    orders_db[order_counter] = {
+        "id": order_counter,
+        "userId": user_id,
+        "product": product,
+        "quantity": quantity
+    }
+    return orders_db[order_counter]
+
+
+@app.get("/orders/{order_id}")
+def get_order(order_id: int):
+    if order_id not in orders_db:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return orders_db[order_id]
+
+
+@app.post("/payments")
+def create_payment(order_id: int, amount: float):
+    global payment_counter
+    if order_id not in orders_db:
+        raise HTTPException(status_code=404, detail="Order not found")
+    payment_counter += 1
+    payments_db[payment_counter] = {
+        "id": payment_counter,
+        "order_id": order_id,
+        "amount": amount,
+        "status": "pending"
+    }
+    return payments_db[payment_counter]
+
+
+@app.get("/users/{user_id}/details")
+def get_user_details(user_id: int):
+    if user_id not in users_db:
+        raise HTTPException(status_code=404, detail="User not found")
+    user = users_db[user_id]
+    user_orders = [o for o in orders_db.values() if o["userId"] == user_id]
+    return {"user": user, "orders": user_orders}
 ```
 
-**Инвалидация кэша:**
-- При UPDATE - удаляем ключ из Redis
-- При DELETE - удаляем ключ из Redis
-- При следующем GET - данные обновятся из БД
+---
 
-**Закэшированные эндпоинты:**
-- `GET /users/{id}` - часто читается, редко меняется
-- `GET /orders/{id}` - часто читается, редко меняется
-- `GET /payments/{id}` - часто читается, редко меняется
+## Решение
 
-### 3. Circuit Breaker
+разбить на отдельные микросервисы (users, orders, payments) с собственными базами postgresql, добавить api gateway для маршрутизации, redis для кэширования, circuit breaker для отказоустойчивости
 
-Защита от каскадных отказов:
+---
+
+## Код после рефакторинга
+
+### структура проекта
 
 ```
-┌─────────────┐
-│   CLOSED    │  ← Нормальная работа
-│  (запросы   │
-│  проходят)  │
-└──────┬──────┘
-       │ 5 ошибок подряд
-       ▼
-┌─────────────┐
-│    OPEN     │  ← Сервис упал
-│  (запросы   │     Мгновенный отказ
-│  блокируются)│
-└──────┬──────┘
-       │ Через 30 секунд
-       ▼
-┌─────────────┐
-│  HALF_OPEN  │  ← Пробуем восстановить
-│  (пробный   │
-│   запрос)   │
-└──────┬──────┘
-       │ Успех → CLOSED
-       │ Ошибка → OPEN
+api_gateway/
+    main.py
+service_users/
+    app/
+        main.py
+        models.py
+        schemas.py
+        database.py
+        redis_client.py
+        routes/users.py
+        services/user_service.py
+service_orders/
+    app/
+        ...аналогичная структура
+service_payments/
+    app/
+        ...аналогичная структура
+docker-compose.yml
 ```
 
-**Тест Circuit Breaker:**
-
-```bash
-# 1. Останови сервис users
-docker-compose stop service_users
-
-# 2. Попробуй сделать запрос (первые 5 будут долгими)
-for i in {1..10}; do
-  curl http://localhost:8000/users/1
-done
-
-# 3. Проверь статус circuit breaker
-curl http://localhost:8000/health
-
-# Увидишь:
-# {
-#   "circuits": {
-#     "users": {
-#       "status": "OPEN",
-#       "failure_count": 5
-#     }
-#   }
-# }
-
-# 4. Запусти сервис обратно
-docker-compose start service_users
-
-# 5. Через 30 секунд circuit закроется
-```
-
-### 4. API Aggregation
-
-Один запрос вместо двух:
+### api gateway с circuit breaker
 
 ```python
+from fastapi import FastAPI, HTTPException, Request
+import httpx
+import asyncio
+from datetime import datetime, timedelta
+from typing import Optional
+
+app = FastAPI(title="API Gateway")
+
+USERS_SERVICE_URL = "http://service_users:8000"
+ORDERS_SERVICE_URL = "http://service_orders:8000"
+PAYMENTS_SERVICE_URL = "http://service_payments:8000"
+
+
+class CircuitBreaker:
+    def __init__(self, name: str):
+        self.name = name
+        self.failure_count = 0
+        self.failure_threshold = 5
+        self.timeout_duration = 30
+        self.last_failure_time: Optional[datetime] = None
+        self.state = "CLOSED"
+
+    def is_open(self) -> bool:
+        if self.state == "OPEN":
+            if self.last_failure_time and \
+               datetime.now() - self.last_failure_time > timedelta(seconds=self.timeout_duration):
+                self.state = "HALF_OPEN"
+                return False
+            return True
+        return False
+
+    def record_success(self):
+        self.failure_count = 0
+        if self.state == "HALF_OPEN":
+            self.state = "CLOSED"
+
+    def record_failure(self):
+        self.failure_count += 1
+        self.last_failure_time = datetime.now()
+        if self.failure_count >= self.failure_threshold:
+            self.state = "OPEN"
+
+    async def call(self, func, *args, **kwargs):
+        if self.is_open():
+            raise HTTPException(status_code=503, detail=f"{self.name} service unavailable")
+        try:
+            result = await func(*args, **kwargs)
+            self.record_success()
+            return result
+        except Exception as e:
+            self.record_failure()
+            raise e
+
+
+users_circuit = CircuitBreaker("Users")
+orders_circuit = CircuitBreaker("Orders")
+payments_circuit = CircuitBreaker("Payments")
+
+
+async def make_request(url: str, method: str = "GET", data: dict = None):
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        if method == "GET":
+            response = await client.get(url)
+        elif method == "POST":
+            response = await client.post(url, json=data)
+        elif method == "PUT":
+            response = await client.put(url, json=data)
+        elif method == "DELETE":
+            response = await client.delete(url)
+        response.raise_for_status()
+        return response.json()
+
+
+@app.get("/users/{user_id}")
+async def get_user(user_id: int):
+    return await users_circuit.call(make_request, f"{USERS_SERVICE_URL}/users/{user_id}")
+
+
 @app.get("/users/{user_id}/details")
 async def get_user_details(user_id: int):
-    # Параллельные запросы к двум сервисам
-    user_task = users_circuit.call(...)
-    orders_task = orders_circuit.call(...)
-    
+    user_task = users_circuit.call(make_request, f"{USERS_SERVICE_URL}/users/{user_id}")
+    orders_task = orders_circuit.call(make_request, f"{ORDERS_SERVICE_URL}/orders")
     user, all_orders = await asyncio.gather(user_task, orders_task)
-    
-    # Фильтрация заказов пользователя
     user_orders = [o for o in all_orders if o.get("userId") == user_id]
-    
-    return {
-        "user": user,
-        "orders": user_orders
-    }
+    return {"user": user, "orders": user_orders}
 ```
 
-### 5. Сервис платежей (Payments)
+---
 
-**Особенности:**
-- Имитация обработки платежа (30% шанс отказа)
-- Три статуса: `pending`, `completed`, `failed`
-- При создании автоматически определяется статус
+### микросервис users
+
+**models.py**
 
 ```python
-# Имитация обработки
-if random.random() < 0.3:
-    payment.status = "failed"
-else:
-    payment.status = "completed"
+from sqlalchemy import Column, Integer, String, DateTime
+from datetime import datetime
+from .database import Base
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    name = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 ```
 
-## 🧪 Тестирование
+**user_service.py с кэшированием**
 
-### Проверка кэширования
+```python
+from sqlalchemy.orm import Session
+from typing import Optional, List
+from ..models import User
+from ..schemas import UserCreate, UserUpdate
+from ..redis_client import redis_client
 
-```bash
-# Первый запрос (в логах: Cache MISS)
-time curl http://localhost:8000/users/1
 
-# Второй запрос (в логах: Cache HIT, быстрее!)
-time curl http://localhost:8000/users/1
+class UserService:
 
-# Проверка Redis
-docker-compose exec cache redis-cli
-> KEYS *
-1) "user:1"
-> GET user:1
-> TTL user:1
-(integer) 287  # Осталось 287 секунд до удаления
+    @staticmethod
+    def get_user_by_id(db: Session, user_id: int) -> Optional[dict]:
+        cache_key = f"user:{user_id}"
+
+        cached_user = redis_client.get(cache_key)
+        if cached_user:
+            return cached_user
+
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return None
+
+        user_dict = {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "created_at": user.created_at.isoformat()
+        }
+
+        redis_client.set(cache_key, user_dict, expire=300)
+        return user_dict
+
+    @staticmethod
+    def update_user(db: Session, user_id: int, user_data: UserUpdate) -> Optional[User]:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return None
+
+        update_data = user_data.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(user, key, value)
+
+        db.commit()
+        db.refresh(user)
+        redis_client.delete(f"user:{user_id}")
+        return user
+
+    @staticmethod
+    def delete_user(db: Session, user_id: int) -> Optional[User]:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return None
+
+        db.delete(user)
+        db.commit()
+        redis_client.delete(f"user:{user_id}")
+        return user
 ```
 
-### Проверка персистентности данных
+---
 
-```bash
-# Создай пользователя
-curl -X POST http://localhost:8000/users \
-  -H "Content-Type: application/json" \
-  -d '{"email": "test@mail.ru", "name": "Test"}'
+### docker-compose.yml
 
-# Останови и запусти снова
-docker-compose down
-docker-compose up
+```yaml
+version: '3.8'
 
-# Пользователь на месте!
-curl http://localhost:8000/users/1
+services:
+  api_gateway:
+    build: ./api_gateway
+    ports:
+      - "8000:8000"
+    depends_on:
+      - service_users
+      - service_orders
+      - service_payments
+
+  service_users:
+    build: ./service_users
+    depends_on:
+      - db_users
+      - cache
+
+  service_orders:
+    build: ./service_orders
+    depends_on:
+      - db_orders
+      - cache
+
+  service_payments:
+    build: ./service_payments
+    depends_on:
+      - db_payments
+      - cache
+
+  db_users:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: users_db
+
+  db_orders:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: orders_db
+
+  db_payments:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: payments_db
+
+  cache:
+    image: redis:7
 ```
 
-## 📊 Схема базы данных
+---
 
-### Таблица users
-```sql
-CREATE TABLE users (
-    id SERIAL PRIMARY KEY,
-    email VARCHAR UNIQUE NOT NULL,
-    name VARCHAR NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-```
+## Итог
 
-### Таблица orders
-```sql
-CREATE TABLE orders (
-    id SERIAL PRIMARY KEY,
-    userId INTEGER NOT NULL,
-    product VARCHAR NOT NULL,
-    quantity INTEGER DEFAULT 1,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-```
+монолит разбит на три независимых микросервиса, каждый со своей бд, добавлено кэширование через redis с инвалидацией при изменениях, circuit breaker защищает от каскадных отказов, api aggregation позволяет получать связанные данные одним запросом.
 
-### Таблица payments
-```sql
-CREATE TABLE payments (
-    id SERIAL PRIMARY KEY,
-    order_id INTEGER NOT NULL,
-    amount FLOAT NOT NULL,
-    status VARCHAR DEFAULT 'pending',
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-```
-
-**Связи:**
-- `orders.userId` логически связан с `users.id`
-- `payments.order_id` логически связан с `orders.id`
-
-## 🔍 Подключение к БД
-
-```bash
-# PostgreSQL Users
-docker-compose exec db_users psql -U user -d users_db
-# \dt - список таблиц
-# SELECT * FROM users;
-# \q - выход
-
-# PostgreSQL Orders
-docker-compose exec db_orders psql -U user -d orders_db
-
-# PostgreSQL Payments
-docker-compose exec db_payments psql -U user -d payments_db
-
-# Redis
-docker-compose exec cache redis-cli
-# KEYS * - все ключи
-# GET user:1 - получить значение
-# FLUSHALL - очистить весь кэш
-```
-
-## 🛑 Остановка проекта
-
-```bash
-# Остановить контейнеры
-docker-compose down
-
-# Остановить и удалить volumes (УДАЛИТ ВСЕ ДАННЫЕ!)
-docker-compose down -v
-```
-
-## 📋 Технологии
-
-- **FastAPI 0.104.1** - веб-фреймворк
-- **Uvicorn** - ASGI сервер
-- **SQLAlchemy 2.0.23** - ORM для работы с БД
-- **PostgreSQL 15** - реляционная БД
-- **Redis 7** - кэширование
-- **httpx** - async HTTP клиент
-- **Pydantic 2.5.0** - валидация данных
-- **Docker & Docker Compose** - контейнеризация
-
-## ✅ Критерии оценки
-
-- ✅ **Корректность работы** - все эндпоинты работают
-- ✅ **Чистота кода** - PEP 8, type hints, docstrings
-- ✅ **Правильная структура** - модули models, schemas, routes, services
-- ✅ **Docker Compose** - запуск одной командой
-- ✅ **Кэширование** - работает и ускоряет запросы
-- ✅ **Дополнительный сервис** - Payments реализован
-- ✅ **PostgreSQL** - данные сохраняются
-- ✅ **Circuit Breaker** - защита от отказов
-
-## 📈 Производительность
-
-**Без кэша (первый запрос):**
-```
-GET /users/1
-Time: ~50ms (запрос в PostgreSQL)
-```
-
-**С кэшем (повторный запрос):**
-```
-GET /users/1
-Time: ~5ms (из Redis)
-Ускорение: 10x!
-```
-
-## 🎓 Выводы
-
-### Проблемы и решения:
-
-1. **Проблема:** Хранение в памяти → Данные теряются после перезапуска
-   **Решение:** PostgreSQL с SQLAlchemy ORM
-
-2. **Проблема:** Медленные запросы к БД при высокой нагрузке
-   **Решение:** Redis кэширование с TTL 5 минут
-
-3. **Проблема:** Отказ одного сервиса влияет на всю систему
-   **Решение:** Circuit Breaker паттерн
-
-4. **Проблема:** Множественные запросы к разным сервисам
-   **Решение:** API Aggregation
-
-5. **Проблема:** Монолитная структура кода
-   **Решение:** Разделение на слои (models, schemas, routes, services)
-
-## 🚀 Готово к использованию!
-
-Проект полностью рефакторирован и готов к production deployment!
+![W](img.png)
+![W](img_1.png)
+![W](img_2.png)
