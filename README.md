@@ -88,7 +88,8 @@ def get_user_details(user_id: int):
 
 разбить на отдельные микросервисы (users, orders, payments) с собственными базами postgresql, добавить api gateway для маршрутизации, redis для кэширования, circuit breaker для отказоустойчивости
 
----
+
+
 
 ## Код после рефакторинга
 
@@ -346,6 +347,164 @@ services:
   cache:
     image: redis:7
 ```
+
+---
+
+## Сервис платежей (дополнительный сервис по варианту)
+
+Сервис обрабатывает платежи для заказов. При создании платежа происходит имитация обработки: 70% успешных платежей, 30% отказов.
+
+### Модель данных Payment
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | INTEGER | Первичный ключ |
+| order_id | INTEGER | ID заказа |
+| amount | FLOAT | Сумма платежа |
+| status | STRING | pending / completed / failed |
+| created_at | TIMESTAMP | Дата создания |
+| updated_at | TIMESTAMP | Дата обновления |
+
+### Эндпоинты
+
+| Метод | URL | Описание |
+|-------|-----|----------|
+| GET | /payments | Список платежей (фильтр по order_id) |
+| GET | /payments/{id} | Получить платеж по ID |
+| POST | /payments | Создать платеж |
+| PUT | /payments/{id} | Обновить статус платежа |
+| DELETE | /payments/{id} | Удалить платеж |
+
+### Пример запроса
+
+**POST /payments**
+```json
+{
+  "order_id": 1,
+  "amount": 1500.00
+}
+```
+
+**Ответ (успех):**
+```json
+{
+  "id": 1,
+  "order_id": 1,
+  "amount": 1500.00,
+  "status": "completed",
+  "created_at": "2025-01-15T10:00:00",
+  "updated_at": "2025-01-15T10:00:00"
+}
+```
+
+**Ответ (отказ, 30% случаев):**
+```json
+{
+  "id": 1,
+  "order_id": 1,
+  "amount": 1500.00,
+  "status": "failed",
+  "created_at": "2025-01-15T10:00:00",
+  "updated_at": "2025-01-15T10:00:00"
+}
+```
+
+---
+
+## Кэширование
+
+Для снижения нагрузки на базы данных используется Redis с стратегией Cache-Aside (Lazy Loading).
+
+### Кэшируемые запросы
+
+| Эндпоинт | TTL | Причина кэширования |
+|----------|-----|---------------------|
+| GET /users/{id} | 300 сек | Данные пользователя редко меняются, запрашиваются часто |
+| GET /orders/{id} | 300 сек | Информация о заказе нужна при работе с платежами |
+| GET /payments/{id} | 300 сек | Статус платежа проверяется многократно |
+
+### Стратегия инвалидации
+
+При обновлении или удалении сущности соответствующий ключ удаляется из Redis:
+
+```python
+# При обновлении/удалении пользователя
+redis_client.delete(f"user:{user_id}")
+
+# При обновлении/удалении заказа
+redis_client.delete(f"order:{order_id}")
+
+# При обновлении/удалении платежа
+redis_client.delete(f"payment:{payment_id}")
+```
+
+---
+
+## API Gateway
+
+Единая точка входа для всех клиентских запросов на порту 8000.
+
+### Маршрутизация
+
+| Путь | Сервис |
+|------|--------|
+| /users/* | Users Service |
+| /orders/* | Orders Service |
+| /payments/* | Payments Service |
+
+### Таблица эндпоинтов
+
+| Метод | Эндпоинт | Описание | Тело запроса | Тело ответа |
+|-------|----------|----------|--------------|-------------|
+| GET | /users | Список пользователей | - | `[{id, email, name, created_at}]` |
+| GET | /users/{id} | Получить пользователя | - | `{id, email, name, created_at}` |
+| POST | /users | Создать пользователя | `{email, name}` | `{id, email, name, created_at}` |
+| PUT | /users/{id} | Обновить пользователя | `{email?, name?}` | `{id, email, name, created_at}` |
+| DELETE | /users/{id} | Удалить пользователя | - | `{message, deletedUser}` |
+| GET | /orders | Список заказов | - | `[{id, userId, product, quantity, created_at}]` |
+| GET | /orders/{id} | Получить заказ | - | `{id, userId, product, quantity, created_at}` |
+| POST | /orders | Создать заказ | `{userId, product, quantity?}` | `{id, userId, product, quantity, created_at}` |
+| PUT | /orders/{id} | Обновить заказ | `{userId?, product?, quantity?}` | `{id, userId, product, quantity, created_at}` |
+| DELETE | /orders/{id} | Удалить заказ | - | `{message, deletedOrder}` |
+| GET | /payments | Список платежей | - | `[{id, order_id, amount, status, created_at, updated_at}]` |
+| GET | /payments/{id} | Получить платеж | - | `{id, order_id, amount, status, created_at, updated_at}` |
+| POST | /payments | Создать платеж | `{order_id, amount}` | `{id, order_id, amount, status, created_at, updated_at}` |
+| PUT | /payments/{id} | Обновить платеж | `{status}` | `{id, order_id, amount, status, created_at, updated_at}` |
+| DELETE | /payments/{id} | Удалить платеж | - | `{message, deletedPayment}` |
+
+### Агрегация запросов
+
+**GET /users/{user_id}/details** — возвращает пользователя с его заказами (два параллельных запроса к Users и Orders сервисам).
+
+Запрос:
+```
+GET /users/1/details
+```
+
+Ответ:
+```json
+{
+  "user": {
+    "id": 1,
+    "email": "test@mail.ru",
+    "name": "Test User",
+    "created_at": "2025-01-15T10:00:00"
+  },
+  "orders": [
+    {"id": 1, "userId": 1, "product": "Book", "quantity": 2, "created_at": "2025-01-15T11:00:00"},
+    {"id": 2, "userId": 1, "product": "Phone", "quantity": 1, "created_at": "2025-01-15T12:00:00"}
+  ]
+}
+```
+
+### Circuit Breaker
+
+Для защиты от каскадных отказов используется паттерн Circuit Breaker:
+- **failure_threshold**: 5 ошибок для открытия цепи
+- **timeout_duration**: 30 секунд до перехода в half-open
+- **request_timeout**: 3 секунды на запрос
+
+При недоступности сервиса возвращается HTTP 503 с сообщением о временной недоступности.
 
 ---
 
